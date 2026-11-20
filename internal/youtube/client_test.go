@@ -459,3 +459,20 @@ func TestRedirectDoesNotSendCredentialsToAnotherOrigin(t *testing.T) {
 		t.Fatalf("redirect was unexpectedly followed: %v", err)
 	}
 }
+
+func TestConflictAbortedRetriesOnInsert(t *testing.T) {
+	var attempts atomic.Int32
+	client := mockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = io.WriteString(w, `{"error":{"code":409,"status":"ABORTED","errors":[{"reason":"SERVICE_UNAVAILABLE"}]}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"item1","snippet":{"resourceId":{"videoId":"aaaaaaaaaaa"}}}`)
+	}, Options{Tokens: tokenFunc(staticToken)})
+	item, err := client.InsertPlaylistItem(t.Context(), "PLTest", "aaaaaaaaaaa", nil)
+	if err != nil || item.ID != "item1" || attempts.Load() != 2 {
+		t.Fatalf("409 ABORTED retry = %+v, attempts=%d, err=%v", item, attempts.Load(), err)
+	}
+}

@@ -126,7 +126,7 @@ func decodeError(status int, retryHeader string, body []byte, now time.Time) *AP
 		"videoAlreadyInAnotherSeriesPlaylist", "channelNotFound", "videoNotFound", "playlistItemNotFound",
 		"playlistNotFound", "videoNotAvailable", "invalidVideoId", "rateLimitExceeded", "userRateLimitExceeded",
 		"insufficientPermissions", "forbidden", "playlistForbidden", "playlistItemsNotAccessible",
-		"playlistOperationUnsupported", "backendError", "authError", "keyInvalid", "accessNotConfigured":
+		"playlistOperationUnsupported", "backendError", "SERVICE_UNAVAILABLE", "authError", "keyInvalid", "accessNotConfigured":
 		e.Reason = reason
 	}
 	switch {
@@ -143,6 +143,7 @@ func decodeError(status int, retryHeader string, body []byte, now time.Time) *AP
 	case status == http.StatusNotFound && reason == "playlistNotFound":
 		e.Kind, e.Message = PlaylistNotFound, "找不到指定的 YouTube 歌单"
 	case status == http.StatusTooManyRequests, status >= 500 && status < 600,
+		status == http.StatusConflict && (e.GoogleStatus == "ABORTED" || reason == "SERVICE_UNAVAILABLE"),
 		(status == http.StatusForbidden || status == http.StatusConflict) &&
 			(reason == "rateLimitExceeded" || reason == "userRateLimitExceeded"):
 		e.Kind, e.Message = Transient, "YouTube Data API 暂时无法处理请求"
