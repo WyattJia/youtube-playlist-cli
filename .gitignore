@@ -32,3 +32,19 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# ytpl local state, exports, built binary, and credentials
+.state/
+out/
+/ytpl
+.DS_Store
+*.tmp
+.ytpl-tmp-*
+client_secret_*.json
+auth-ytm/
+**/auth-ytm/
+api-key.txt
+**/api-key.txt
+**/auth/token.json
+**/auth/client.json
+**/auth/api-key.txt
