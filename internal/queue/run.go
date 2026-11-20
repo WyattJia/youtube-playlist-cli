@@ -27,6 +27,7 @@ type RunOptions struct {
 	ConfirmRecreate bool
 	ConfirmReinsert bool
 	Now             func() time.Time
+	Sleep           func(context.Context, time.Duration) error
 }
 
 type Stop struct {
@@ -77,6 +78,9 @@ func (s Store) Run(ctx context.Context, api API, opts RunOptions) (RunResult, er
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.Sleep == nil {
+		opts.Sleep = sleepContext
 	}
 	err := s.withLock(func() error {
 		q, err := s.load()
@@ -175,12 +179,12 @@ func (r *runner) process(ctx context.Context, p *Playlist) error {
 	if p.Status == Conflict || p.Status == Full {
 		return nil
 	}
-	ready, err := r.prepareTarget(ctx, p)
+	ready, justCreated, err := r.prepareTarget(ctx, p)
 	if err != nil || !ready {
 		return err
 	}
 	var items []youtube.PlaylistItem
-	if p.YouTubeID != "" {
+	if p.YouTubeID != "" && !justCreated {
 		items, err = r.api.ListPlaylistItems(ctx, p.YouTubeID)
 		if err != nil {
 			return r.playlistFailure(p, err)
@@ -237,7 +241,10 @@ func (r *runner) process(ctx context.Context, p *Playlist) error {
 			return err
 		}
 
-		item, err := r.api.InsertPlaylistItem(ctx, p.YouTubeID, t.VideoID, nil)
+		item, err := r.insertTrack(ctx, p.YouTubeID, t.VideoID, justCreated)
+		if err == nil {
+			justCreated = false
+		}
 		var apiErr *youtube.APIError
 		errors.As(err, &apiErr)
 		ambiguous := apiErr != nil && apiErr.Ambiguous
@@ -285,19 +292,19 @@ func (r *runner) process(ctx context.Context, p *Playlist) error {
 	return nil
 }
 
-func (r *runner) prepareTarget(ctx context.Context, p *Playlist) (bool, error) {
+func (r *runner) prepareTarget(ctx context.Context, p *Playlist) (bool, bool, error) {
 	marker := sourceMarker(p.SourceID, r.q.SourceCommit)
 	wasPending := p.CreationPending
 	if wasPending {
 		remote, err := r.api.ListMyPlaylists(ctx)
 		if err != nil {
-			return false, r.playlistFailure(p, err)
+			return false, false, r.playlistFailure(p, err)
 		}
 		var matches []string
 		for _, candidate := range remote {
 			if candidate.Snippet.Title == p.Name && strings.Contains(candidate.Snippet.Description, marker) {
 				if !videoid.ValidPlaylist(candidate.ID) {
-					return false, errors.New("找到来源标记，但远端歌单 ID 无效")
+					return false, false, errors.New("找到来源标记，但远端歌单 ID 无效")
 				}
 				if !slices.Contains(matches, candidate.ID) {
 					matches = append(matches, candidate.ID)
@@ -312,49 +319,74 @@ func (r *runner) prepareTarget(ctx context.Context, p *Playlist) (bool, error) {
 			slices.Sort(matches)
 			p.ConflictingYouTubeIDs = matches
 			p.Status, p.Error = Conflict, "来源标记命中多个可能的目标，请核对歌单 ID 后重新初始化"
-			return false, r.persist()
+			return false, false, r.persist()
 		case len(matches) == 1:
 			p.YouTubeID, p.CreationPending = matches[0], false
 			p.Status, p.Error = Pending, ""
 			r.report.Recovered++
-			return true, r.persist()
+			return true, false, r.persist()
 		case p.YouTubeID != "":
 			p.Status, p.Error = Paused, "已有计划目标 ID，但旧创建记录尚未通过远端来源标记确认"
-			return false, r.persist()
+			return false, false, r.persist()
 		case !r.opts.ConfirmRecreate:
 			p.Status = Paused
 			p.Error = "远端还未显示来源标记，保留待确认状态。请稍后重试，确认远端不存在后才使用 --confirm-recreate"
-			return false, r.persist()
+			return false, false, r.persist()
 		}
 	}
 	if p.YouTubeID != "" {
-		return true, nil
+		return true, false, nil
 	}
 	if r.opts.DryRun {
 		r.report.PlannedCreates++
-		return true, nil
+		return true, true, nil
 	}
 
 	p.CreationPending = true
 	p.Status, p.Error = Paused, "创建结果待确认"
 	if err := r.persist(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	created, err := r.api.CreatePlaylist(ctx, p.Name, marker, "private")
 	if err != nil {
 		var apiErr *youtube.APIError
 		p.CreationPending = wasPending || errors.As(err, &apiErr) && apiErr.Ambiguous
-		return false, r.playlistFailure(p, err)
+		return false, false, r.playlistFailure(p, err)
 	}
 	if !videoid.ValidPlaylist(created.ID) {
 		err := &youtube.APIError{Kind: youtube.Transient, Ambiguous: true, Message: "创建请求未返回有效的目标 ID"}
-		return false, r.playlistFailure(p, err)
+		return false, false, r.playlistFailure(p, err)
 	}
 	p.YouTubeID, p.CreationPending = created.ID, false
 	p.Status, p.Error = Pending, ""
 	r.report.Created++
 	r.transient = 0
-	return true, r.persist()
+	return true, true, r.persist()
+}
+
+func (r *runner) insertTrack(ctx context.Context, playlistID, videoID string, justCreated bool) (youtube.PlaylistItem, error) {
+	// Newly created playlists can briefly return 404 playlistNotFound while propagating.
+	delays := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	for attempt := 0; ; attempt++ {
+		item, err := r.api.InsertPlaylistItem(ctx, playlistID, videoID, nil)
+		if !justCreated || youtube.KindOf(err) != youtube.PlaylistNotFound || attempt >= len(delays) {
+			return item, err
+		}
+		if sleepErr := r.opts.Sleep(ctx, delays[attempt]); sleepErr != nil {
+			return youtube.PlaylistItem{}, sleepErr
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func updateStatus(p *Playlist) {

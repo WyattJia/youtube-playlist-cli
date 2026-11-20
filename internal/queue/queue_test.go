@@ -618,3 +618,34 @@ func TestInsertedEquivalentVideoIDPersistsAcrossRuns(t *testing.T) {
 		t.Fatalf("actualVideoId not persisted: %+v, %v", state.Playlists[0].Tracks[0], err)
 	}
 }
+
+func TestNewlyCreatedPlaylistSkipsReadAndRetriesPropagationLag(t *testing.T) {
+	s, _ := initialized(t, onePlaylist("null", videoA), "")
+	reads, inserts, sleeps := 0, 0, 0
+	api := fakeAPI{
+		create: func(title, desc, privacy string) (youtube.Playlist, error) {
+			return youtube.Playlist{ID: "PLNewPropagating"}, nil
+		},
+		items: func(string) ([]youtube.PlaylistItem, error) {
+			reads++
+			return nil, &youtube.APIError{Kind: youtube.PlaylistNotFound, Reason: "playlistNotFound", Message: "not propagated yet"}
+		},
+		insert: func(playlistID, video string, _ *int) (youtube.PlaylistItem, error) {
+			inserts++
+			if inserts == 1 {
+				return youtube.PlaylistItem{}, &youtube.APIError{Kind: youtube.PlaylistNotFound, Reason: "playlistNotFound", Message: "propagating"}
+			}
+			return playlistItems(video)[0], nil
+		},
+	}
+	res, err := s.Run(t.Context(), api, RunOptions{
+		Sleep: func(context.Context, time.Duration) error {
+			sleeps++
+			return nil
+		},
+	})
+	if err != nil || res.Created != 1 || res.Inserted != 1 || res.Playlists[0].Status != Done ||
+		reads != 0 || inserts != 2 || sleeps != 1 {
+		t.Fatalf("post-create propagation = %+v, reads=%d inserts=%d sleeps=%d, err=%v", res, reads, inserts, sleeps, err)
+	}
+}
