@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light;
+  font: 100%/1.65 system-ui, sans-serif;
+  color: #192428;
+  background: #f8faf9;
+}
+
+body {
+  margin: 0;
+}
+
+header {
+  border-bottom: 1px solid #d8e1dd;
+  background: #fff;
+}
+
+nav,
+main {
+  box-sizing: border-box;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding-inline: 1.5rem;
+}
+
+nav {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .75rem 1.5rem;
+  padding-block: 1rem;
+}
+
+main {
+  padding-block: 2.25rem 4rem;
+}
+
+a {
+  color: #145449;
+  text-underline-offset: .2em;
+}
+
+.brand,
+[aria-current="page"] {
+  font-weight: 700;
+}
+
+.brand {
+  font-size: 1.125rem;
+}
+
+h1,
+h2 {
+  line-height: 1.25;
+}
+
+h1 {
+  font-size: clamp(2rem, 8vw, 3rem);
+  margin-block: 0 1rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin-block: 1.8rem .5rem;
+}
+
+p,
+ol {
+  margin-block: .5rem 1rem;
+}
+
+.intro {
+  font-size: 1.25rem;
+}
+
+code {
+  overflow-wrap: anywhere;
+  background: #e7efec;
+  padding: .12em .3em;
+  border-radius: .2em;
+}
+
+li + li {
+  margin-top: .5rem;
+}
