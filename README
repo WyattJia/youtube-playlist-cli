@@ -1,0 +1,76 @@
+ytpl - YouTube & YouTube Music playlist CLI
+=============================================
+
+ytpl manages YouTube and YouTube Music playlists through the official
+YouTube Data API v3. Zero external dependencies. No browser cookies.
+
+Platforms: macOS, Linux (Go 1.26+).
+
+BUILD
+-----
+
+    go build -o ytpl ./cmd/ytpl
+
+Or install directly:
+
+    go install github.com/WyattJia/youtube-playlist-cli/cmd/ytpl@latest
+
+AUTH
+----
+
+Enable YouTube Data API v3 in a Google Cloud project.
+
+  * Desktop OAuth 2.0: required for private playlists and all writes.
+  * API Key (optional): read-only access to public playlists by ID.
+
+    ytpl auth import --client /path/to/client.json
+    ytpl auth login
+    ytpl whoami
+
+    ytpl auth set-api-key --stdin < /path/to/api-key.txt
+
+Note: OAuth apps in "Testing" expire refresh tokens after 7 days. Set
+the consent screen to "In Production" (no verification needed for
+personal use) and run `ytpl auth login` once.
+
+USAGE
+-----
+
+    ytpl sync [--playlist ID] [--with-items]
+    ytpl list [--remote]
+    ytpl show PLAYLIST [--remote]
+    ytpl create --title NAME [--privacy private|unlisted|public]
+    ytpl update PLAYLIST [--title NAME] [--description TEXT] [--privacy P]
+    ytpl delete PLAYLIST --yes
+    ytpl add PLAYLIST VIDEO... [--file PATH] [--allow-duplicates]
+    ytpl remove PLAYLIST [--item-id ID]... [--video VIDEO]...
+    ytpl dedupe PLAYLIST [--keep first|last]
+    ytpl reorder PLAYLIST (--move FROM TO | --by title|channel|added|reverse)
+    ytpl export (PLAYLIST | --all) --out DIR [--format json|csv|txt]
+    ytpl quota
+
+All write commands accept --dry-run. Global flags: --state-dir, --json,
+--api-key, --help, --version. Run `ytpl --help` for details.
+
+QUOTA
+-----
+
+Default YouTube Data API v3 quota is 10,000 units/day (resets midnight
+America/Los_Angeles). Reads cost 1 unit/page; writes cost 50 units each.
+Batch migration (`ytpl migrate run`) reserves 500 units/day by default
+and resumes across days automatically.
+
+    ytpl migrate init --plan plan.json [--record record.json]
+    ytpl migrate status
+    ytpl migrate run [--dry-run] [--budget N] [--max-writes N]
+
+TEST
+----
+
+    go vet ./...
+    go test -race ./...
+
+LICENSE
+-------
+
+MIT. See LICENSE.
